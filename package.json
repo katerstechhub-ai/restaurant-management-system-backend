@@ -1,0 +1,32 @@
+{
+  "name": "restaurant-management-system-backend",
+  "version": "1.0.0",
+  "description": "Node.js/Express/MongoDB backend for a Restaurant Management System capstone project.",
+  "main": "index.js",
+  "scripts": {
+    "dev": "nodemon server.js",
+    "start": "node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/katerstechhub-ai/restaurant-management-system-backend.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/katerstechhub-ai/restaurant-management-system-backend/issues"
+  },
+  "homepage": "https://github.com/katerstechhub-ai/restaurant-management-system-backend#readme",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.9.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
