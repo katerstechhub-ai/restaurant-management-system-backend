@@ -9,7 +9,7 @@ Node.js/Express/MongoDB backend for a Restaurant Management System capstone proj
 
 ## Setup
 1. `npm install`
-2. Copy `.env.example` to `.env` and fill in values
+2. `.env`
 3. `npm run dev`
 
 ## Branching
