@@ -8,4 +8,10 @@ const reservationSchema = new mongoose.Schema({
   status: { type: String, enum: ['confirmed', 'cancelled', 'completed'], default: 'confirmed' }
 }, { timestamps: true });
 
+// Prevent double-booking: only one confirmed reservation per table/date/timeSlot
+reservationSchema.index(
+  { table: 1, date: 1, timeSlot: 1 },
+  { unique: true, partialFilterExpression: { status: 'confirmed' } }
+);
+
 module.exports = mongoose.model('Reservation', reservationSchema);
