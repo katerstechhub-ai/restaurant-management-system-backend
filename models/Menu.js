@@ -7,6 +7,7 @@ const menuSchema = new mongoose.Schema({
   category: String,
   available: { type: Boolean, default: true },
   image: { type: String, default: '' },
+  prepTimeMinutes: { type: Number },
 }, { timestamps: true });
 
 module.exports = mongoose.model('Menu', menuSchema);

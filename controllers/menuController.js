@@ -29,13 +29,13 @@ const getMenuItemById = async (req, res) => {
 // Admin only
 const createMenuItem = async (req, res) => {
     try {
-        const { name, description, price, category, available, image } = req.body;
+        const { name, description, price, category, available, image, prepTimeMinutes } = req.body;
 
         if (!name || price === undefined) {
             return res.status(400).json({ message: 'Name and price are required' });
         }
 
-        const item = await Menu.create({ name, description, price, category, available, image });
+        const item = await Menu.create({ name, description, price, category, available, image, prepTimeMinutes });
         res.status(201).json(item);
     } catch (err) {
         res.status(500).json({ message: 'Server error creating menu item', error: err.message });
@@ -46,7 +46,7 @@ const createMenuItem = async (req, res) => {
 // Admin only
 const updateMenuItem = async (req, res) => {
     try {
-        const { name, description, price, category, available, image } = req.body;
+        const { name, description, price, category, available, image, prepTimeMinutes } = req.body;
 
         const item = await Menu.findById(req.params.id);
         if (!item) {
@@ -59,6 +59,7 @@ const updateMenuItem = async (req, res) => {
         if (category !== undefined) item.category = category;
         if (available !== undefined) item.available = available;
         if (image !== undefined) item.image = image;
+        if (prepTimeMinutes !== undefined) item.prepTimeMinutes = prepTimeMinutes;
 
         const updated = await item.save();
         res.status(200).json(updated);
