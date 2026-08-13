@@ -1,11 +1,18 @@
+const mongoose = require('mongoose');
 const Order = require('../models/Order');
 const Menu = require('../models/Menu');
+const User = require('../models/User');
+const WalletTransaction = require('../models/WalletTransaction');
 
 // @route  POST /api/orders
-// Authenticated users (customer/staff) can place an order
+// Authenticated users (customer/staff) can place an order.
+// Delivery orders MUST be paid from the wallet. Dine-in orders can
+// optionally be paid from the wallet via `payWithWallet: true` in the body.
 const createOrder = async (req, res) => {
+  const session = await mongoose.startSession();
   try {
-    const { items, orderType, table } = req.body;
+    const { items, orderType, table, payWithWallet } = req.body;
+    const resolvedOrderType = orderType || 'dine-in';
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ message: 'Order must include at least one item' });
@@ -34,16 +41,79 @@ const createOrder = async (req, res) => {
       });
     }
 
-    const order = await Order.create({
-      customer: req.user._id,
-      items: resolvedItems,
-      orderType: orderType || 'dine-in',
-      table: table || undefined,
-      totalAmount,
-    });
+    // Delivery is always wallet-paid. Dine-in is wallet-paid only if the client asked for it.
+    const requiresWalletPayment =
+      resolvedOrderType === 'delivery' || (resolvedOrderType === 'dine-in' && payWithWallet === true);
+
+    let order;
+
+    if (requiresWalletPayment) {
+      session.startTransaction();
+      try {
+        const user = await User.findById(req.user._id).session(session);
+
+        if (user.walletBalance < totalAmount) {
+          await session.abortTransaction();
+          return res.status(402).json({
+            message: 'Insufficient wallet balance',
+            balance: user.walletBalance,
+            required: totalAmount,
+            shortfall: Number((totalAmount - user.walletBalance).toFixed(2)),
+          });
+        }
+
+        user.walletBalance -= totalAmount;
+        await user.save({ session });
+
+        const createdOrders = await Order.create(
+          [{
+            customer: req.user._id,
+            items: resolvedItems,
+            orderType: resolvedOrderType,
+            table: table || undefined,
+            totalAmount,
+            paidWithWallet: true,
+          }],
+          { session }
+        );
+        order = createdOrders[0];
+
+        await WalletTransaction.create(
+          [{
+            user: user._id,
+            type: 'deduction',
+            amount: totalAmount,
+            balanceAfter: user.walletBalance,
+            method: 'wallet',
+            description: `Payment for order #${order._id.toString().slice(-6)}`,
+          }],
+          { session }
+        );
+
+        await session.commitTransaction();
+      } catch (txErr) {
+        await session.abortTransaction();
+        throw txErr;
+      } finally {
+        session.endSession();
+      }
+    } else {
+      session.endSession(); // not used on this path
+      order = await Order.create({
+        customer: req.user._id,
+        items: resolvedItems,
+        orderType: resolvedOrderType,
+        table: table || undefined,
+        totalAmount,
+        paidWithWallet: false,
+      });
+    }
 
     res.status(201).json(order);
   } catch (err) {
+    if (session.inTransaction && session.inTransaction()) {
+      await session.abortTransaction();
+    }
     res.status(500).json({ message: 'Server error creating order', error: err.message });
   }
 };
@@ -76,7 +146,6 @@ const getOrderById = async (req, res) => {
       return res.status(404).json({ message: 'Order not found' });
     }
 
-    // Customers can only view their own orders
     if (req.user.role === 'customer' && order.customer._id.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Not authorized to view this order' });
     }

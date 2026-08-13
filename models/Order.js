@@ -11,6 +11,7 @@ const orderSchema = new mongoose.Schema({
   orderType: { type: String, enum: ['dine-in', 'delivery'], default: 'dine-in' },
   table: { type: mongoose.Schema.Types.ObjectId, ref: 'Table' },
   totalAmount: Number,
+  paidWithWallet: { type: Boolean, default: false },
 }, { timestamps: true });
 
 module.exports = mongoose.model('Order', orderSchema);
