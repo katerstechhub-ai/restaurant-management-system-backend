@@ -55,7 +55,7 @@ const getOrders = async (req, res) => {
     const filter = req.user.role === 'customer' ? { customer: req.user._id } : {};
 
     const orders = await Order.find(filter)
-      .populate('items.menuItem', 'name price category')
+      .populate('items.menuItem', 'name price category image')
       .populate('customer', 'name email')
       .sort({ createdAt: -1 });
 
@@ -69,7 +69,7 @@ const getOrders = async (req, res) => {
 const getOrderById = async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
-      .populate('items.menuItem', 'name price category')
+      .populate('items.menuItem', 'name price category image')
       .populate('customer', 'name email');
 
     if (!order) {
