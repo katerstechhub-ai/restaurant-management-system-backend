@@ -2,9 +2,9 @@ const Order = require('../models/Order');
 
 exports.getKitchenQueue = async (req, res) => {
   try {
-    // Fetch pending and in-progress orders
+    // Fetch pending and preparing orders
     const queue = await Order.find({
-      status: { $in: ['pending', 'in-progress'] }
+      status: { $in: ['pending', 'preparing'] }
     }).populate('customer', 'name email')
       .populate('items.menuItem')
       .sort({ createdAt: 1 }); // oldest first
@@ -18,7 +18,7 @@ exports.getKitchenQueue = async (req, res) => {
 exports.updateOrderStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status } = req.body; // 'in-progress', 'completed'
+    const { status } = req.body; // 'preparing', 'ready', 'completed'
 
     const order = await Order.findById(id);
     if (!order) return res.status(404).json({ message: 'Order not found' });
