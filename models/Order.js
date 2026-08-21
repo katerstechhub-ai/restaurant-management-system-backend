@@ -7,7 +7,7 @@ const orderSchema = new mongoose.Schema({
     quantity: { type: Number, required: true },
     customizations: String,
   }],
-  status: { type: String, enum: ['pending', 'in-progress', 'completed'], default: 'pending' },
+  status: { type: String, enum: ['pending', 'in-progress', 'ready', 'completed'], default: 'pending' },
   orderType: { type: String, enum: ['dine-in', 'delivery'], default: 'dine-in' },
   table: { type: mongoose.Schema.Types.ObjectId, ref: 'Table' },
   totalAmount: Number,
