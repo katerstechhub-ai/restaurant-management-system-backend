@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const Customer = require('../models/Customer');
 const sendEmail = require('../utils/sendEmail');
 
 const generateToken = (id) =>
@@ -30,6 +31,13 @@ const register = async (req, res) => {
       password: hashedPassword,
       ...(role ? { role } : {}),
     });
+
+    // Every customer-role account needs a matching Customer profile
+    // (CRM data — preferences, feedback, segment) or they'll never show up
+    // in the customers list, segments, etc.
+    if (user.role === 'customer') {
+      await Customer.create({ user: user._id });
+    }
 
     res.status(201).json({
       _id: user._id,
