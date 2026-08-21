@@ -13,6 +13,9 @@ const inventoryRoutes = require('./routes/inventoryRoutes');
 const kitchenRoutes = require('./routes/kitchenRoutes');
 const walletRoutes = require('./routes/walletRoutes');
 const uploadRoutes = require('./routes/uploadRoutes');
+const customerRoutes = require('./routes/customerRoutes');
+const supportRoutes = require('./routes/supportRoutes');
+const reportRoutes = require('./routes/reportRoutes');
 
 const app = express();
 app.use(cors());
@@ -32,6 +35,9 @@ app.use('/api/inventory', inventoryRoutes);
 app.use('/api/kitchen', kitchenRoutes);
 app.use('/api/wallet', walletRoutes);
 app.use('/api/uploads', uploadRoutes);
+app.use('/api/customers', customerRoutes);
+app.use('/api/support', supportRoutes);
+app.use('/api/reports', reportRoutes);
 
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('MongoDB connected'))
