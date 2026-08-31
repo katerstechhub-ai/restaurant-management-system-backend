@@ -4,6 +4,7 @@ const reservationController = require('../controllers/reservationController');
 const { protect } = require('../middleware/authMiddleware');
 
 router.get('/available', reservationController.getAvailableSlots);
+router.get('/mine', protect, reservationController.getMyReservations);
 router.post('/', protect, reservationController.createReservation);
 router.delete('/:id', protect, reservationController.cancelReservation);
 
