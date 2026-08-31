@@ -161,7 +161,7 @@ const getOrderById = async (req, res) => {
 const updateOrderStatus = async (req, res) => {
   try {
     const { status } = req.body;
-    const validStatuses = ['pending', 'in-progress', 'completed'];
+    const validStatuses = ['pending', 'preparing', 'ready', 'completed'];
 
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ message: `Status must be one of: ${validStatuses.join(', ')}` });
