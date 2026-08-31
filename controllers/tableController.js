@@ -11,8 +11,8 @@ exports.getAllTables = async (req, res) => {
 
 exports.addTable = async (req, res) => {
   try {
-    const { tableNumber, capacity } = req.body;
-    const newTable = new Table({ tableNumber, capacity });
+    const { tableNumber, capacity, x, y, shape } = req.body;
+    const newTable = new Table({ tableNumber, capacity, x, y, shape });
     await newTable.save();
     res.status(201).json(newTable);
   } catch (error) {

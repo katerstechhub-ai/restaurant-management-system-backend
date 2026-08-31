@@ -19,6 +19,18 @@ exports.getAvailableSlots = async (req, res) => {
   }
 };
 
+exports.getMyReservations = async (req, res) => {
+  try {
+    const customerId = req.user.id;
+    const reservations = await Reservation.find({ customer: customerId })
+      .populate('table')
+      .sort({ date: -1 });
+    res.json(reservations);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 exports.createReservation = async (req, res) => {
   try {
     const { tableId, date, timeSlot } = req.body;
