@@ -3,7 +3,6 @@ const SupportTicket = require('../models/SupportTicket');
 exports.getAllTickets = async (req, res) => {
   try {
     const tickets = await SupportTicket.find()
-      .populate('customer', 'name email')
       .populate('handledBy', 'name')
       .sort({ createdAt: -1 });
     res.json(tickets);
@@ -14,8 +13,8 @@ exports.getAllTickets = async (req, res) => {
 
 exports.createTicket = async (req, res) => {
   try {
-    const { subject, message } = req.body;
-    const ticket = new SupportTicket({ customer: req.user._id, subject, message });
+    const { subject, customerName, message } = req.body;
+    const ticket = new SupportTicket({ subject, customerName, message });
     await ticket.save();
     res.status(201).json(ticket);
   } catch (error) {
