@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 
 const supportTicketSchema = new mongoose.Schema({
-  customer: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  customerName: { type: String, required: true },
   subject: { type: String, required: true },
   message: { type: String, required: true },
   status: { type: String, enum: ['open', 'in-progress', 'resolved'], default: 'open' },
