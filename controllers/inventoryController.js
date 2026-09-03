@@ -23,7 +23,7 @@ exports.addInventoryItem = async (req, res) => {
 exports.updateStock = async (req, res) => {
   try {
     const { id } = req.params;
-    const { amount, type } = req.body; // type can be 'add' or 'subtract'
+    const { amount, type, reorderPoint } = req.body;
 
     const item = await Inventory.findById(id);
     if (!item) return res.status(404).json({ message: 'Item not found' });
@@ -33,6 +33,8 @@ exports.updateStock = async (req, res) => {
     } else if (type === 'subtract') {
       item.quantity -= amount;
       if (item.quantity < 0) item.quantity = 0;
+    } else if (reorderPoint !== undefined) {
+      item.reorderPoint = reorderPoint;
     } else {
       return res.status(400).json({ message: 'Invalid movement type' });
     }
