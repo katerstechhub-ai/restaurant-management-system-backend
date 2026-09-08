@@ -1,8 +1,55 @@
 const mongoose = require('mongoose');
+const axios = require('axios');
 const Order = require('../models/Order');
 const Menu = require('../models/Menu');
 const User = require('../models/User');
 const WalletTransaction = require('../models/WalletTransaction');
+
+// Shared by createOrder and payOrderWithCard — validates the cart against
+// the menu and computes the price server-side (never trust client-sent
+// prices). Throws a { status, message } style error object on failure so
+// both callers can respond consistently.
+async function resolveOrderItems(items) {
+  if (!items || !Array.isArray(items) || items.length === 0) {
+    throw { status: 400, message: 'Order must include at least one item' };
+  }
+
+  let totalAmount = 0;
+  const resolvedItems = [];
+
+  for (const entry of items) {
+    const menuItem = await Menu.findById(entry.menuItem);
+    if (!menuItem) {
+      throw { status: 404, message: `Menu item not found: ${entry.menuItem}` };
+    }
+    if (!menuItem.available) {
+      throw { status: 400, message: `Menu item unavailable: ${menuItem.name}` };
+    }
+
+    const quantity = entry.quantity || 1;
+    totalAmount += menuItem.price * quantity;
+
+    resolvedItems.push({
+      menuItem: menuItem._id,
+      quantity,
+      customizations: entry.customizations || '',
+    });
+  }
+
+  return { resolvedItems, totalAmount };
+}
+
+// Resolves the delivery address to use for an order: whatever was typed at
+// checkout, falling back to the address already on the user's profile.
+// Throws if the order is a delivery order and neither exists.
+function resolveDeliveryAddress(resolvedOrderType, suppliedAddress, userAddress) {
+  if (resolvedOrderType !== 'delivery') return undefined;
+  const address = (suppliedAddress && suppliedAddress.trim()) || userAddress;
+  if (!address) {
+    throw { status: 400, message: 'Delivery address is required' };
+  }
+  return address;
+}
 
 // @route  POST /api/orders
 // Authenticated users (customer/staff) can place an order.
@@ -11,34 +58,15 @@ const WalletTransaction = require('../models/WalletTransaction');
 const createOrder = async (req, res) => {
   const session = await mongoose.startSession();
   try {
-    const { items, orderType, table, payWithWallet } = req.body;
+    const { items, orderType, table, payWithWallet, deliveryAddress } = req.body;
     const resolvedOrderType = orderType || 'dine-in';
 
-    if (!items || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ message: 'Order must include at least one item' });
-    }
-
-    // Validate menu items exist and calculate total server-side (never trust client-sent prices)
-    let totalAmount = 0;
-    const resolvedItems = [];
-
-    for (const entry of items) {
-      const menuItem = await Menu.findById(entry.menuItem);
-      if (!menuItem) {
-        return res.status(404).json({ message: `Menu item not found: ${entry.menuItem}` });
-      }
-      if (!menuItem.available) {
-        return res.status(400).json({ message: `Menu item unavailable: ${menuItem.name}` });
-      }
-
-      const quantity = entry.quantity || 1;
-      totalAmount += menuItem.price * quantity;
-
-      resolvedItems.push({
-        menuItem: menuItem._id,
-        quantity,
-        customizations: entry.customizations || '',
-      });
+    let resolvedItems, totalAmount, address;
+    try {
+      ({ resolvedItems, totalAmount } = await resolveOrderItems(items));
+      address = resolveDeliveryAddress(resolvedOrderType, deliveryAddress, req.user.address);
+    } catch (validationErr) {
+      return res.status(validationErr.status || 400).json({ message: validationErr.message });
     }
 
     // Delivery is always wallet-paid. Dine-in is wallet-paid only if the client asked for it.
@@ -72,6 +100,7 @@ const createOrder = async (req, res) => {
               table: table || undefined,
               totalAmount,
               paidWithWallet: true,
+              deliveryAddress: address,
             }],
             { session }
           );
@@ -98,6 +127,7 @@ const createOrder = async (req, res) => {
             table: table || undefined,
             totalAmount,
             paidWithWallet: false,
+            deliveryAddress: address,
           }],
           { session }
         );
@@ -126,9 +156,102 @@ const createOrder = async (req, res) => {
       return res.status(402).json({ message: 'Insufficient wallet balance', ...insufficientBalance });
     }
 
+    // First time this user has given us a delivery address — save it to
+    // their profile so future orders don't ask again.
+    if (order && address && !req.user.address) {
+      await User.findByIdAndUpdate(req.user._id, { address });
+    }
+
     res.status(201).json(order);
   } catch (err) {
     res.status(500).json({ message: 'Server error creating order', error: err.message });
+  }
+};
+
+// @route  POST /api/orders/pay
+// Card-payment path — mirrors walletController.verifyTopUp: Paystack is the
+// only source of truth for amount/status, and the order is only created
+// once payment is confirmed, so an unpaid attempt never reaches the kitchen
+// queue and never touches inventory. Same Paystack keys as wallet top-ups,
+// so funds settle straight to the restaurant's connected Paystack account —
+// there's no separate "enter the owner's account number" step needed.
+const payOrderWithCard = async (req, res) => {
+  try {
+    const { reference, items, orderType, table, deliveryAddress } = req.body;
+    if (!reference) {
+      return res.status(400).json({ message: 'Reference is required' });
+    }
+
+    // Idempotency check #1 — already processed? (user refreshed after
+    // paying, or the callback fired twice)
+    const existing = await Order.findOne({ paystackReference: reference });
+    if (existing) {
+      return res.status(200).json(existing);
+    }
+
+    const resolvedOrderType = orderType || 'dine-in';
+
+    let resolvedItems, totalAmount, address;
+    try {
+      ({ resolvedItems, totalAmount } = await resolveOrderItems(items));
+      address = resolveDeliveryAddress(resolvedOrderType, deliveryAddress, req.user.address);
+    } catch (validationErr) {
+      return res.status(validationErr.status || 400).json({ message: validationErr.message });
+    }
+
+    // Verify with Paystack — the only source of truth for amount/status
+    const verifyRes = await axios.get(
+      `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,
+      { headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}` } }
+    );
+
+    const data = verifyRes.data?.data;
+    if (!data || data.status !== 'success') {
+      return res.status(400).json({ message: 'Payment not successful' });
+    }
+
+    if (String(data.metadata?.userId) !== String(req.user._id)) {
+      return res.status(403).json({ message: 'Reference does not belong to this user' });
+    }
+
+    // Guard against a stale cart total / tampering — what was actually
+    // charged must match what this cart actually costs.
+    if (data.amount !== Math.round(totalAmount * 100)) {
+      return res.status(400).json({ message: 'Payment amount does not match order total' });
+    }
+
+    let order;
+    try {
+      order = await Order.create({
+        customer: req.user._id,
+        items: resolvedItems,
+        orderType: resolvedOrderType,
+        table: table || undefined,
+        totalAmount,
+        paidWithCard: true,
+        paystackReference: reference,
+        deliveryAddress: address,
+      });
+    } catch (dupErr) {
+      // Idempotency check #2 — race condition caught by the unique index on `reference`
+      if (dupErr.code === 11000) {
+        const raced = await Order.findOne({ paystackReference: reference });
+        return res.status(200).json(raced);
+      }
+      throw dupErr;
+    }
+
+    if (address && !req.user.address) {
+      await User.findByIdAndUpdate(req.user._id, { address });
+    }
+
+    await decrementInventoryForItems(resolvedItems);
+    order.stockDecremented = true;
+    await order.save();
+
+    res.status(201).json(order);
+  } catch (err) {
+    res.status(500).json({ message: 'Server error processing card payment', error: err.message });
   }
 };
 
@@ -137,7 +260,8 @@ const createOrder = async (req, res) => {
 // ingredients configured are skipped — inventory tracking is opt-in per dish,
 // not required for every menu item. Stock is clamped at 0 rather than going
 // negative or blocking the order (mirrors inventoryController.updateStock).
-async function decrementInventoryForItems(resolvedItems, session) {
+// `session` is optional — payOrderWithCard calls this outside a transaction.
+async function decrementInventoryForItems(resolvedItems, session = null) {
   const Inventory = require('../models/Inventory');
 
   for (const line of resolvedItems) {
@@ -244,4 +368,4 @@ const updateOrderStatus = async (req, res) => {
   }
 };
 
-module.exports = { createOrder, getOrders, getOrderById, updateOrderStatus };
+module.exports = { createOrder, payOrderWithCard, getOrders, getOrderById, updateOrderStatus };
