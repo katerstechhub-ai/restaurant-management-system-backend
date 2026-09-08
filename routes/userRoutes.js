@@ -1,14 +1,14 @@
 const express = require('express');
 const router = express.Router();
-const reportController = require('../controllers/reportController');
+const { createUser, getAllUsers, updateUserRole } = require('../controllers/userController');
 const { protect } = require('../middleware/authMiddleware');
 const { restrictTo } = require('../middleware/roleMiddleware');
 
 router.use(protect);
 router.use(restrictTo('admin'));
 
-router.get('/sales-trends', reportController.getSalesTrends);
-router.get('/top-dishes', reportController.getTopDishes);
-router.post('/generate', reportController.generateReport);
+router.get('/', getAllUsers);
+router.post('/', createUser);
+router.put('/:id/role', updateUserRole);
 
 module.exports = router;

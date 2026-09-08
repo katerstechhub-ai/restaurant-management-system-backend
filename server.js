@@ -16,6 +16,7 @@ const uploadRoutes = require('./routes/uploadRoutes');
 const customerRoutes = require('./routes/customerRoutes');
 const supportRoutes = require('./routes/supportRoutes');
 const reportRoutes = require('./routes/reportRoutes');
+const userRoutes = require('./routes/userRoutes');
 
 const app = express();
 app.use(cors());
@@ -38,6 +39,7 @@ app.use('/api/uploads', uploadRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/support', supportRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/users', userRoutes);
 
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('MongoDB connected'))

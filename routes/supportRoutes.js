@@ -6,11 +6,12 @@ const { restrictTo } = require('../middleware/roleMiddleware');
 
 router.use(protect);
 
-// Any authenticated user (customer, staff, admin) can file a ticket.
+// Any authenticated user (customer, waiter, kitchen, admin) can file a ticket.
 router.post('/', supportController.createTicket);
 
-// Only staff/admin can view and triage the full ticket list.
-router.get('/', restrictTo('admin', 'staff'), supportController.getAllTickets);
-router.put('/:id', restrictTo('admin', 'staff'), supportController.updateTicket);
+// Any staff role can triage tickets — admin isn't always available,
+// so waiter/kitchen can pick up and resolve complaints too.
+router.get('/', restrictTo('admin', 'waiter', 'kitchen'), supportController.getAllTickets);
+router.put('/:id', restrictTo('admin', 'waiter', 'kitchen'), supportController.updateTicket);
 
 module.exports = router;
