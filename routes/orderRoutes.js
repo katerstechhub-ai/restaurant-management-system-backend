@@ -12,6 +12,6 @@ const { restrictTo } = require('../middleware/roleMiddleware');
 router.post('/', protect, createOrder);
 router.get('/', protect, getOrders);
 router.get('/:id', protect, getOrderById);
-router.patch('/:id/status', protect, restrictTo('admin', 'staff'), updateOrderStatus);
+router.patch('/:id/status', protect, restrictTo('admin', 'waiter', 'kitchen'), updateOrderStatus);
 
 module.exports = router;

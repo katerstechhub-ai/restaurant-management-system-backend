@@ -5,7 +5,7 @@ const { protect } = require('../middleware/authMiddleware');
 const { restrictTo } = require('../middleware/roleMiddleware');
 
 router.use(protect);
-router.use(restrictTo('admin', 'staff'));
+router.use(restrictTo('admin', 'kitchen'));
 
 router.get('/', inventoryController.getAllInventory);
 router.post('/', inventoryController.addInventoryItem);

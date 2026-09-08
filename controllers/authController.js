@@ -9,9 +9,12 @@ const generateToken = (id) =>
   jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '30d' });
 
 // @route  POST /api/auth/register
+// Public signup — always creates a customer account. Staff/admin accounts
+// are created by an existing admin via POST /api/users instead (see
+// userController.createUser), never through this open endpoint.
 const register = async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({ message: 'Name, email, and password are required' });
@@ -29,15 +32,13 @@ const register = async (req, res) => {
       name,
       email,
       password: hashedPassword,
-      ...(role ? { role } : {}),
+      role: 'customer',
     });
 
     // Every customer-role account needs a matching Customer profile
     // (CRM data — preferences, feedback, segment) or they'll never show up
     // in the customers list, segments, etc.
-    if (user.role === 'customer') {
-      await Customer.create({ user: user._id });
-    }
+    await Customer.create({ user: user._id });
 
     res.status(201).json({
       _id: user._id,
