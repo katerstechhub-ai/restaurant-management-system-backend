@@ -12,9 +12,12 @@ const generateToken = (id) =>
 // Public signup — always creates a customer account. Staff/admin accounts
 // are created by an existing admin via POST /api/users instead (see
 // userController.createUser), never through this open endpoint.
+// Address is optional here — someone can sign up without one and add it
+// later via PATCH /api/auth/address, e.g. right before paying for their
+// first delivery order.
 const register = async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, address } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({ message: 'Name, email, and password are required' });
@@ -33,6 +36,7 @@ const register = async (req, res) => {
       email,
       password: hashedPassword,
       role: 'customer',
+      address: address && address.trim() ? address.trim() : undefined,
     });
 
     // Every customer-role account needs a matching Customer profile
@@ -45,6 +49,7 @@ const register = async (req, res) => {
       name: user.name,
       email: user.email,
       role: user.role,
+      address: user.address,
       token: generateToken(user._id),
     });
   } catch (err) {
@@ -76,6 +81,7 @@ const login = async (req, res) => {
       name: user.name,
       email: user.email,
       role: user.role,
+      address: user.address,
       token: generateToken(user._id),
     });
   } catch (err) {
@@ -90,6 +96,26 @@ const getMe = async (req, res) => {
     res.status(200).json(req.user);
   } catch (err) {
     res.status(500).json({ message: 'Server error fetching profile', error: err.message });
+  }
+};
+
+// @route  PATCH /api/auth/address
+// Lets a logged-in user add or update their delivery address — used at
+// checkout when a delivery order needs one and it isn't on file yet.
+const updateAddress = async (req, res) => {
+  try {
+    const { address } = req.body;
+    if (!address || !address.trim()) {
+      return res.status(400).json({ message: 'Address is required' });
+    }
+
+    const user = await User.findById(req.user._id);
+    user.address = address.trim();
+    await user.save();
+
+    res.status(200).json({ address: user.address });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error updating address', error: err.message });
   }
 };
 
@@ -172,4 +198,4 @@ const resetPassword = async (req, res) => {
   }
 };
 
-module.exports = { register, login, getMe, forgotPassword, resetPassword };
+module.exports = { register, login, getMe, updateAddress, forgotPassword, resetPassword };
