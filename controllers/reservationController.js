@@ -105,6 +105,12 @@ exports.createReservation = async (req, res) => {
       return res.status(400).json({ message: 'This table is currently out of service' });
     }
 
+    // Note: this does NOT touch table.status. Whether a table shows
+    // "reserved" on the live floor plan is computed on read in
+    // tableController.getAllTables, based on whether *right now* falls
+    // inside this reservation's time-slot window — not stored here. That
+    // way a booking for next week doesn't block today's walk-ins, and a
+    // booking for tonight clears itself the moment the slot ends.
     const reservation = new Reservation({
       customer: customerId,
       table: tableId,
@@ -112,6 +118,7 @@ exports.createReservation = async (req, res) => {
       timeSlot
     });
     await reservation.save();
+
     res.status(201).json(reservation);
   } catch (error) {
     // Duplicate-key error from the unique index means the slot is already taken
@@ -131,13 +138,9 @@ exports.cancelReservation = async (req, res) => {
     reservation.status = 'cancelled';
     await reservation.save();
 
-    // Release the associated table so it can be booked again — but don't
-    // resurrect a table an admin has deliberately marked out of service.
-    const table = await Table.findById(reservation.table);
-    if (table && table.status !== 'unavailable') {
-      table.status = 'available';
-      await table.save();
-    }
+    // No table.status to release here — reservations never mutate it (see
+    // createReservation). Live floor state is owned entirely by
+    // tableController (walk-in/auto-assign/release/out-of-service).
 
     res.json({ message: 'Reservation cancelled' });
   } catch (error) {
