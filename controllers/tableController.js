@@ -1,9 +1,67 @@
 const Table = require('../models/Table');
+const Reservation = require('../models/Reservation');
+
+// How long a reservation holds a table on the live floor plan, and how far
+// ahead of the slot it starts showing as "reserved". Both computed on read
+// only — never written to the database — so a table clears itself the
+// moment the window passes, with no cron job needed, and a booking for a
+// future date never blocks today's walk-ins.
+const SLOT_DURATION_MINUTES = 60;
+const RESERVED_LEAD_MINUTES = 30;
+
+function isSlotActiveNow(reservationDate, timeSlot) {
+  const [hours, minutes] = timeSlot.split(':').map(Number);
+  const slotStart = new Date(reservationDate);
+  slotStart.setHours(hours, minutes, 0, 0);
+
+  const windowStart = new Date(slotStart.getTime() - RESERVED_LEAD_MINUTES * 60000);
+  const slotEnd = new Date(slotStart.getTime() + SLOT_DURATION_MINUTES * 60000);
+
+  const now = new Date();
+  return now >= windowStart && now <= slotEnd;
+}
+
+// Table IDs that have a confirmed reservation whose window covers this exact
+// moment. Only today's reservations are even worth checking — anything
+// earlier or later can't have an active window right now.
+async function getActivelyReservedTableIds() {
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+  const endOfDay = new Date();
+  endOfDay.setHours(23, 59, 59, 999);
+
+  const todaysReservations = await Reservation.find({
+    status: 'confirmed',
+    date: { $gte: startOfDay, $lte: endOfDay },
+  });
+
+  const activeIds = new Set();
+  for (const r of todaysReservations) {
+    if (isSlotActiveNow(r.date, r.timeSlot)) {
+      activeIds.add(r.table.toString());
+    }
+  }
+  return activeIds;
+}
 
 exports.getAllTables = async (req, res) => {
   try {
     const tables = await Table.find().sort({ tableNumber: 1 });
-    res.json(tables);
+    const activelyReservedIds = await getActivelyReservedTableIds();
+
+    // Overlay the computed "reserved" state on top of whatever's actually
+    // stored. Live floor state always wins: a table someone is physically
+    // sitting at ('occupied') or one that's out of service ('unavailable')
+    // isn't overridden by a reservation window.
+    const annotated = tables.map((t) => {
+      const table = t.toObject();
+      if (table.status === 'available' && activelyReservedIds.has(t._id.toString())) {
+        table.status = 'reserved';
+      }
+      return table;
+    });
+
+    res.json(annotated);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
