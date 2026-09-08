@@ -19,6 +19,65 @@ exports.getAvailableSlots = async (req, res) => {
   }
 };
 
+// @route  GET /api/reservations/availability?date=YYYY-MM-DD&timeSlot=...
+// The "seat map" endpoint — every table, annotated with whether it can be
+// picked for this specific date + timeSlot. No auth required, same as
+// getAvailableSlots above, so customers can browse before logging in
+// (like checking flight seats before you've entered payment details).
+//
+// A table shows 'unavailable' if it's out of service (Table.status), or
+// 'booked' if it already has a confirmed reservation for this exact
+// date+timeSlot. A table that's currently 'occupied' on the live floor
+// (someone dining right now) does NOT block a future reservation slot —
+// that's what the Reservation record itself is for.
+exports.getTableAvailability = async (req, res) => {
+  try {
+    const { date, timeSlot } = req.query;
+    if (!date || !timeSlot) {
+      return res.status(400).json({ message: 'date and timeSlot are required' });
+    }
+
+    const parsedDate = new Date(date);
+    if (isNaN(parsedDate.getTime())) {
+      return res.status(400).json({ message: 'Invalid date' });
+    }
+
+    const tables = await Table.find().sort({ tableNumber: 1 });
+
+    const reservations = await Reservation.find({
+      date: parsedDate,
+      timeSlot,
+      status: 'confirmed',
+    });
+    const bookedTableIds = new Set(reservations.map((r) => r.table.toString()));
+
+    const seatMap = tables.map((t) => {
+      let availability;
+      if (t.status === 'unavailable') {
+        availability = 'unavailable';
+      } else if (bookedTableIds.has(t._id.toString())) {
+        availability = 'booked';
+      } else {
+        availability = 'available';
+      }
+
+      return {
+        _id: t._id,
+        tableNumber: t.tableNumber,
+        capacity: t.capacity,
+        x: t.x,
+        y: t.y,
+        shape: t.shape,
+        availability,
+      };
+    });
+
+    res.json({ date, timeSlot, tables: seatMap });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 exports.getMyReservations = async (req, res) => {
   try {
     const customerId = req.user.id;
@@ -38,6 +97,13 @@ exports.createReservation = async (req, res) => {
 
     const table = await Table.findById(tableId);
     if (!table) return res.status(404).json({ message: 'Table not found' });
+
+    // A table out of service can never be booked, no matter the date/slot —
+    // mirrors the check in getTableAvailability so the seat map and the
+    // actual booking can never disagree.
+    if (table.status === 'unavailable') {
+      return res.status(400).json({ message: 'This table is currently out of service' });
+    }
 
     const reservation = new Reservation({
       customer: customerId,
@@ -65,8 +131,13 @@ exports.cancelReservation = async (req, res) => {
     reservation.status = 'cancelled';
     await reservation.save();
 
-    // Release the associated table so it can be booked again
-    await Table.findByIdAndUpdate(reservation.table, { status: 'available' });
+    // Release the associated table so it can be booked again — but don't
+    // resurrect a table an admin has deliberately marked out of service.
+    const table = await Table.findById(reservation.table);
+    if (table && table.status !== 'unavailable') {
+      table.status = 'available';
+      await table.save();
+    }
 
     res.json({ message: 'Reservation cancelled' });
   } catch (error) {

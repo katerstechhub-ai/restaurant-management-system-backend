@@ -46,25 +46,50 @@ const createOrder = async (req, res) => {
       resolvedOrderType === 'delivery' || (resolvedOrderType === 'dine-in' && payWithWallet === true);
 
     let order;
+    let insufficientBalance = null;
 
-    if (requiresWalletPayment) {
-      session.startTransaction();
-      try {
+    session.startTransaction();
+    try {
+      if (requiresWalletPayment) {
         const user = await User.findById(req.user._id).session(session);
 
         if (user.walletBalance < totalAmount) {
           await session.abortTransaction();
-          return res.status(402).json({
-            message: 'Insufficient wallet balance',
+          insufficientBalance = {
             balance: user.walletBalance,
             required: totalAmount,
             shortfall: Number((totalAmount - user.walletBalance).toFixed(2)),
-          });
+          };
+        } else {
+          user.walletBalance -= totalAmount;
+          await user.save({ session });
+
+          const createdOrders = await Order.create(
+            [{
+              customer: req.user._id,
+              items: resolvedItems,
+              orderType: resolvedOrderType,
+              table: table || undefined,
+              totalAmount,
+              paidWithWallet: true,
+            }],
+            { session }
+          );
+          order = createdOrders[0];
+
+          await WalletTransaction.create(
+            [{
+              user: user._id,
+              type: 'deduction',
+              amount: totalAmount,
+              balanceAfter: user.walletBalance,
+              method: 'wallet',
+              description: `Payment for order #${order._id.toString().slice(-6)}`,
+            }],
+            { session }
+          );
         }
-
-        user.walletBalance -= totalAmount;
-        await user.save({ session });
-
+      } else {
         const createdOrders = await Order.create(
           [{
             customer: req.user._id,
@@ -72,51 +97,80 @@ const createOrder = async (req, res) => {
             orderType: resolvedOrderType,
             table: table || undefined,
             totalAmount,
-            paidWithWallet: true,
+            paidWithWallet: false,
           }],
           { session }
         );
         order = createdOrders[0];
+      }
 
-        await WalletTransaction.create(
-          [{
-            user: user._id,
-            type: 'deduction',
-            amount: totalAmount,
-            balanceAfter: user.walletBalance,
-            method: 'wallet',
-            description: `Payment for order #${order._id.toString().slice(-6)}`,
-          }],
-          { session }
-        );
+      if (order) {
+        // Reduce raw-ingredient stock for whatever this order actually consumes.
+        // Stock moves at order creation (kitchen starts pulling ingredients
+        // immediately), not at payment settlement — dine-in orders that pay
+        // later still consume ingredients now.
+        await decrementInventoryForItems(resolvedItems, session);
+        order.stockDecremented = true;
+        await order.save({ session });
 
         await session.commitTransaction();
-      } catch (txErr) {
-        await session.abortTransaction();
-        throw txErr;
-      } finally {
-        session.endSession();
       }
-    } else {
-      session.endSession(); // not used on this path
-      order = await Order.create({
-        customer: req.user._id,
-        items: resolvedItems,
-        orderType: resolvedOrderType,
-        table: table || undefined,
-        totalAmount,
-        paidWithWallet: false,
-      });
+    } catch (txErr) {
+      await session.abortTransaction();
+      throw txErr;
+    } finally {
+      session.endSession();
+    }
+
+    if (insufficientBalance) {
+      return res.status(402).json({ message: 'Insufficient wallet balance', ...insufficientBalance });
     }
 
     res.status(201).json(order);
   } catch (err) {
-    if (session.inTransaction && session.inTransaction()) {
-      await session.abortTransaction();
-    }
     res.status(500).json({ message: 'Server error creating order', error: err.message });
   }
 };
+
+// Decrements Inventory stock for a set of resolved order line items, based on
+// each Menu item's configured `ingredients` recipe. Menu items with no
+// ingredients configured are skipped — inventory tracking is opt-in per dish,
+// not required for every menu item. Stock is clamped at 0 rather than going
+// negative or blocking the order (mirrors inventoryController.updateStock).
+async function decrementInventoryForItems(resolvedItems, session) {
+  const Inventory = require('../models/Inventory');
+
+  for (const line of resolvedItems) {
+    const menuItem = await Menu.findById(line.menuItem).session(session);
+    if (!menuItem || !Array.isArray(menuItem.ingredients) || menuItem.ingredients.length === 0) {
+      continue; // this dish has no ingredient recipe configured — nothing to decrement
+    }
+    for (const ing of menuItem.ingredients) {
+      const needed = ing.quantityUsed * line.quantity;
+      const invItem = await Inventory.findById(ing.inventoryItem).session(session);
+      if (!invItem) continue; // configured ingredient was deleted from inventory — skip rather than fail the order
+      invItem.quantity = Math.max(0, invItem.quantity - needed);
+      await invItem.save({ session });
+    }
+  }
+}
+
+// Restores Inventory stock for a cancelled order's line items (compensating
+// action for decrementInventoryForItems above). Not run in a transaction —
+// it's a best-effort correction, safe to be a no-op for ingredients that no
+// longer exist.
+async function restoreInventoryForItems(items) {
+  const Inventory = require('../models/Inventory');
+
+  for (const line of items) {
+    const menuItem = await Menu.findById(line.menuItem);
+    if (!menuItem || !Array.isArray(menuItem.ingredients)) continue;
+    for (const ing of menuItem.ingredients) {
+      const needed = ing.quantityUsed * line.quantity;
+      await Inventory.findByIdAndUpdate(ing.inventoryItem, { $inc: { quantity: needed } });
+    }
+  }
+}
 
 // @route  GET /api/orders
 // Staff/admin — all orders. Customers — only their own.
@@ -161,7 +215,7 @@ const getOrderById = async (req, res) => {
 const updateOrderStatus = async (req, res) => {
   try {
     const { status } = req.body;
-    const validStatuses = ['pending', 'preparing', 'ready', 'completed'];
+    const validStatuses = ['pending', 'preparing', 'ready', 'completed', 'cancelled'];
 
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ message: `Status must be one of: ${validStatuses.join(', ')}` });
@@ -172,7 +226,16 @@ const updateOrderStatus = async (req, res) => {
       return res.status(404).json({ message: 'Order not found' });
     }
 
+    const wasAlreadyCancelled = order.status === 'cancelled';
     order.status = status;
+
+    // Cancelling an order that already had stock deducted puts those
+    // ingredients back — but only once, and only if we actually took them.
+    if (status === 'cancelled' && !wasAlreadyCancelled && order.stockDecremented) {
+      await restoreInventoryForItems(order.items);
+      order.stockDecremented = false;
+    }
+
     const updated = await order.save();
 
     res.status(200).json(updated);

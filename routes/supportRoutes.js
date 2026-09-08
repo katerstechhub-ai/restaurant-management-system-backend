@@ -9,6 +9,11 @@ router.use(protect);
 // Any authenticated user (customer, waiter, kitchen, admin) can file a ticket.
 router.post('/', supportController.createTicket);
 
+// A customer's own tickets — any authenticated user can hit this, but the
+// controller always scopes the query to req.user._id, so it only ever
+// returns tickets that belong to the caller.
+router.get('/my', supportController.getMyTickets);
+
 // Any staff role can triage tickets — admin isn't always available,
 // so waiter/kitchen can pick up and resolve complaints too.
 router.get('/', restrictTo('admin', 'waiter', 'kitchen'), supportController.getAllTickets);
