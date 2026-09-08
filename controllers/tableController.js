@@ -67,3 +67,28 @@ exports.releaseTable = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+// @route  PATCH /api/tables/status
+// Admin only — take a table out of service ('unavailable') or bring it back
+// ('available'). This is distinct from occupied/released, which reflect
+// live floor state; 'unavailable' means the table can't be booked or seated
+// at all (broken furniture, closed section, etc.) regardless of date/time.
+exports.updateTableStatus = async (req, res) => {
+  try {
+    const { tableId, status } = req.body;
+    const validStatuses = ['available', 'unavailable'];
+
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ message: `Status must be one of: ${validStatuses.join(', ')}` });
+    }
+
+    const table = await Table.findById(tableId);
+    if (!table) return res.status(404).json({ message: 'Table not found' });
+
+    table.status = status;
+    await table.save();
+    res.json({ message: 'Table status updated', table });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};

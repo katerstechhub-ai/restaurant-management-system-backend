@@ -11,10 +11,40 @@ exports.getAllTickets = async (req, res) => {
   }
 };
 
+// A customer's own tickets — scoped server-side to req.user._id, so a
+// customer can never see or guess their way into someone else's tickets.
+exports.getMyTickets = async (req, res) => {
+  try {
+    const tickets = await SupportTicket.find({ customer: req.user._id })
+      .sort({ createdAt: -1 });
+    res.json(tickets);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 exports.createTicket = async (req, res) => {
   try {
-    const { subject, customerName, message } = req.body;
-    const ticket = new SupportTicket({ subject, customerName, message });
+    const { subject, message } = req.body;
+
+    // Customers filing their own ticket can only ever file it as themselves —
+    // never trust a free-text customerName from the body for this role, or
+    // one customer could submit a complaint that appears to come from
+    // someone else. Staff logging a complaint on a walk-in customer's behalf
+    // still supply customerName as free text, same as before.
+    const isSelfService = req.user.role === 'customer';
+    const customerName = isSelfService ? req.user.name : req.body.customerName;
+
+    if (!customerName) {
+      return res.status(400).json({ message: 'customerName is required' });
+    }
+
+    const ticket = new SupportTicket({
+      subject,
+      message,
+      customerName,
+      customer: isSelfService ? req.user._id : undefined,
+    });
     await ticket.save();
     res.status(201).json(ticket);
   } catch (error) {

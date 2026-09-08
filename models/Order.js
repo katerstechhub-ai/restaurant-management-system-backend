@@ -7,11 +7,15 @@ const orderSchema = new mongoose.Schema({
     quantity: { type: Number, required: true },
     customizations: String,
   }],
-  status: { type: String, enum: ['pending', 'preparing', 'ready', 'completed'], default: 'pending' },
+  status: { type: String, enum: ['pending', 'preparing', 'ready', 'completed', 'cancelled'], default: 'pending' },
   orderType: { type: String, enum: ['dine-in', 'delivery'], default: 'dine-in' },
   table: { type: mongoose.Schema.Types.ObjectId, ref: 'Table' },
   totalAmount: Number,
   paidWithWallet: { type: Boolean, default: false },
+  // True once ingredient stock has been deducted for this order — guards
+  // against double-decrementing and tells cancellation whether there's
+  // anything to restore.
+  stockDecremented: { type: Boolean, default: false },
 }, { timestamps: true });
 
 module.exports = mongoose.model('Order', orderSchema);
