@@ -5,13 +5,12 @@ const Menu = require('../models/Menu');
 const User = require('../models/User');
 const WalletTransaction = require('../models/WalletTransaction');
 
-// Bank transfer details shown to the customer at checkout. Kept as env vars
-// so they're not hardcoded — set BANK_NAME / BANK_ACCOUNT_NUMBER /
-// BANK_ACCOUNT_NAME in your .env (falls back to placeholders if unset).
+// Bank transfer details shown to the customer at checkout.
+// Fill these in with your actual restaurant bank account details.
 const BANK_DETAILS = {
-  bankName: process.env.BANK_NAME || 'Set BANK_NAME in .env',
-  accountNumber: process.env.BANK_ACCOUNT_NUMBER || 'Set BANK_ACCOUNT_NUMBER in .env',
-  accountName: process.env.BANK_ACCOUNT_NAME || 'Set BANK_ACCOUNT_NAME in .env',
+  bankName: 'GTBank',
+  accountNumber: '0123456789',
+  accountName: 'Rustico Restaurant',
 };
 
 // @route  POST /api/orders
