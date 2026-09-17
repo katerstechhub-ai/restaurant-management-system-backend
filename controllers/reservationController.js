@@ -78,10 +78,21 @@ exports.getTableAvailability = async (req, res) => {
   }
 };
 
+// @route  GET /api/reservations/mine?includeCancelled=true
+// By default, cancelled reservations are excluded — matches the
+// show/hide pattern already used for completed orders and resolved
+// tickets elsewhere in the app. Pass ?includeCancelled=true to see them.
 exports.getMyReservations = async (req, res) => {
   try {
     const customerId = req.user.id;
-    const reservations = await Reservation.find({ customer: customerId })
+    const includeCancelled = req.query.includeCancelled === 'true';
+
+    const filter = { customer: customerId };
+    if (!includeCancelled) {
+      filter.status = { $ne: 'cancelled' };
+    }
+
+    const reservations = await Reservation.find(filter)
       .populate('table')
       .sort({ date: -1 });
     res.json(reservations);

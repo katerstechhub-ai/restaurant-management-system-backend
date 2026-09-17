@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const {
   createOrder,
-  payOrderWithCard,
+  verifyOrderPayment,
   getOrders,
   getOrderById,
   updateOrderStatus,
@@ -11,7 +11,7 @@ const { protect } = require('../middleware/authMiddleware');
 const { restrictTo } = require('../middleware/roleMiddleware');
 
 router.post('/', protect, createOrder);
-router.post('/pay', protect, payOrderWithCard);
+router.post('/:id/verify-payment', protect, verifyOrderPayment);
 router.get('/', protect, getOrders);
 router.get('/:id', protect, getOrderById);
 router.patch('/:id/status', protect, restrictTo('admin', 'waiter', 'kitchen'), updateOrderStatus);
