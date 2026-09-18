@@ -101,14 +101,20 @@ exports.getMyReservations = async (req, res) => {
   }
 };
 
-// @route  GET /api/reservations?date=YYYY-MM-DD
+// @route  GET /api/reservations?date=YYYY-MM-DD&includeCancelled=true
 // Admin/waiter/kitchen — every customer's reservations, optionally
-// filtered to one date. This is what was missing: staff had no endpoint
-// to see reservations customers had made at all.
+// filtered to one date. Cancelled reservations are excluded by default,
+// same convention as getMyReservations — a cancelled booking has nothing
+// left for staff to act on, so it shouldn't clutter the working list.
 exports.getAllReservations = async (req, res) => {
   try {
     const { date } = req.query;
+    const includeCancelled = req.query.includeCancelled === 'true';
     const filter = {};
+
+    if (!includeCancelled) {
+      filter.status = { $ne: 'cancelled' };
+    }
 
     if (date) {
       const parsedDate = new Date(date);
@@ -181,7 +187,10 @@ exports.cancelReservation = async (req, res) => {
 
     // No table.status to release here — reservations never mutate it (see
     // createReservation). Live floor state is owned entirely by
-    // tableController (walk-in/auto-assign/release/out-of-service).
+    // tableController (walk-in/auto-assign/release/out-of-service), and
+    // getAllTables already excludes cancelled reservations from its
+    // "reserved" overlay computation, so this table stops showing reserved
+    // the very next time the floor plan is fetched.
 
     res.json({ message: 'Reservation cancelled' });
   } catch (error) {
