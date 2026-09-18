@@ -1,67 +1,50 @@
 const Table = require('../models/Table');
 const Reservation = require('../models/Reservation');
 
-// How long a reservation holds a table on the live floor plan, and how far
-// ahead of the slot it starts showing as "reserved". Both computed on read
-// only — never written to the database — so a table clears itself the
-// moment the window passes, with no cron job needed, and a booking for a
-// future date never blocks today's walk-ins.
-const SLOT_DURATION_MINUTES = 60;
-const RESERVED_LEAD_MINUTES = 30;
+// How long each reservation slot occupies a table. Matches the frontend's
+// TIME_SLOTS, which are spaced 1 hour apart.
+const SLOT_DURATION_MS = 60 * 60 * 1000;
 
-function isSlotActiveNow(reservationDate, timeSlot) {
-  const [hours, minutes] = timeSlot.split(':').map(Number);
-  const slotStart = new Date(reservationDate);
-  slotStart.setHours(hours, minutes, 0, 0);
-
-  const windowStart = new Date(slotStart.getTime() - RESERVED_LEAD_MINUTES * 60000);
-  const slotEnd = new Date(slotStart.getTime() + SLOT_DURATION_MINUTES * 60000);
-
-  const now = new Date();
-  return now >= windowStart && now <= slotEnd;
-}
-
-// Table IDs that have a confirmed reservation whose window covers this exact
-// moment. Only today's reservations are even worth checking — anything
-// earlier or later can't have an active window right now.
-async function getActivelyReservedTableIds() {
-  const startOfDay = new Date();
-  startOfDay.setHours(0, 0, 0, 0);
-  const endOfDay = new Date();
-  endOfDay.setHours(23, 59, 59, 999);
-
-  const todaysReservations = await Reservation.find({
-    status: 'confirmed',
-    date: { $gte: startOfDay, $lte: endOfDay },
-  });
-
-  const activeIds = new Set();
-  for (const r of todaysReservations) {
-    if (isSlotActiveNow(r.date, r.timeSlot)) {
-      activeIds.add(r.table.toString());
-    }
-  }
-  return activeIds;
-}
-
+// @route  GET /api/tables
+// Returns every table with a LIVE status overlay: a table stored as
+// 'available' shows 'reserved' here if a confirmed reservation for today
+// falls inside its time-slot window right now. This never writes to
+// Table.status — walk-in/release/out-of-service still fully own that field
+// — it's purely a read-time computation so the floor plan actually reflects
+// reservations customers have made, instead of staying 'available' forever.
 exports.getAllTables = async (req, res) => {
   try {
     const tables = await Table.find().sort({ tableNumber: 1 });
-    const activelyReservedIds = await getActivelyReservedTableIds();
 
-    // Overlay the computed "reserved" state on top of whatever's actually
-    // stored. Live floor state always wins: a table someone is physically
-    // sitting at ('occupied') or one that's out of service ('unavailable')
-    // isn't overridden by a reservation window.
-    const annotated = tables.map((t) => {
+    const now = new Date();
+    const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date(now); todayEnd.setHours(23, 59, 59, 999);
+
+    const todaysReservations = await Reservation.find({
+      date: { $gte: todayStart, $lte: todayEnd },
+      status: 'confirmed',
+    });
+
+    const reservedTableIds = new Set();
+    for (const r of todaysReservations) {
+      const [hh, mm] = r.timeSlot.split(':').map(Number);
+      const slotStart = new Date(r.date);
+      slotStart.setHours(hh, mm || 0, 0, 0);
+      const slotEnd = new Date(slotStart.getTime() + SLOT_DURATION_MS);
+      if (now >= slotStart && now < slotEnd) {
+        reservedTableIds.add(r.table.toString());
+      }
+    }
+
+    const result = tables.map((t) => {
       const table = t.toObject();
-      if (table.status === 'available' && activelyReservedIds.has(t._id.toString())) {
+      if (table.status === 'available' && reservedTableIds.has(t._id.toString())) {
         table.status = 'reserved';
       }
       return table;
     });
 
-    res.json(annotated);
+    res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -121,31 +104,6 @@ exports.releaseTable = async (req, res) => {
     table.status = 'available';
     await table.save();
     res.json({ message: 'Table released successfully', table });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// @route  PATCH /api/tables/status
-// Admin only — take a table out of service ('unavailable') or bring it back
-// ('available'). This is distinct from occupied/released, which reflect
-// live floor state; 'unavailable' means the table can't be booked or seated
-// at all (broken furniture, closed section, etc.) regardless of date/time.
-exports.updateTableStatus = async (req, res) => {
-  try {
-    const { tableId, status } = req.body;
-    const validStatuses = ['available', 'unavailable'];
-
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({ message: `Status must be one of: ${validStatuses.join(', ')}` });
-    }
-
-    const table = await Table.findById(tableId);
-    if (!table) return res.status(404).json({ message: 'Table not found' });
-
-    table.status = status;
-    await table.save();
-    res.json({ message: 'Table status updated', table });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
