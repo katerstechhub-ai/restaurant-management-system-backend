@@ -101,6 +101,36 @@ exports.getMyReservations = async (req, res) => {
   }
 };
 
+// @route  GET /api/reservations?date=YYYY-MM-DD
+// Admin/waiter/kitchen — every customer's reservations, optionally
+// filtered to one date. This is what was missing: staff had no endpoint
+// to see reservations customers had made at all.
+exports.getAllReservations = async (req, res) => {
+  try {
+    const { date } = req.query;
+    const filter = {};
+
+    if (date) {
+      const parsedDate = new Date(date);
+      if (isNaN(parsedDate.getTime())) {
+        return res.status(400).json({ message: 'Invalid date' });
+      }
+      const start = new Date(parsedDate); start.setHours(0, 0, 0, 0);
+      const end = new Date(parsedDate); end.setHours(23, 59, 59, 999);
+      filter.date = { $gte: start, $lte: end };
+    }
+
+    const reservations = await Reservation.find(filter)
+      .populate('customer', 'name email')
+      .populate('table', 'tableNumber capacity')
+      .sort({ date: -1, timeSlot: 1 });
+
+    res.json(reservations);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 exports.createReservation = async (req, res) => {
   try {
     const { tableId, date, timeSlot } = req.body;
