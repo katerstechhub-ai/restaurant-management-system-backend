@@ -108,3 +108,28 @@ exports.releaseTable = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+// @route  PATCH /api/tables/status
+// Body: { tableId, status } — status must be 'available', 'occupied', or
+// 'unavailable' (out of service). Admin-only manual override, e.g. taking
+// a broken table out of service or putting it back once fixed.
+exports.updateTableStatus = async (req, res) => {
+  try {
+    const { tableId, status } = req.body;
+    const validStatuses = ['available', 'occupied', 'unavailable'];
+
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ message: `Status must be one of: ${validStatuses.join(', ')}` });
+    }
+
+    const table = await Table.findById(tableId);
+    if (!table) return res.status(404).json({ message: 'Table not found' });
+
+    table.status = status;
+    await table.save();
+
+    res.json({ message: 'Table status updated', table });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
