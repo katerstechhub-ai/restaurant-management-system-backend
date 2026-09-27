@@ -4,14 +4,7 @@ const Order = require('../models/Order');
 const Menu = require('../models/Menu');
 const User = require('../models/User');
 const WalletTransaction = require('../models/WalletTransaction');
-
-// Bank transfer details shown to the customer at checkout.
-// Fill these in with your actual restaurant bank account details.
-const BANK_DETAILS = {
-  bankName: 'GTBank',
-  accountNumber: '0123456789',
-  accountName: 'Rustico Restaurant',
-};
+const BANK_DETAILS = require('../config/bankDetails');
 
 // @route  POST /api/orders
 // Authenticated users (customer/staff) can place an order.
@@ -202,6 +195,29 @@ const verifyOrderPayment = async (req, res) => {
   }
 };
 
+// @route  PATCH /api/orders/:id/confirm-payment
+// Admin/waiter only — marks a bank_transfer order as paid once staff has
+// actually seen the money land. Wallet and Paystack orders already confirm
+// automatically; this is the manual step bank transfer needs.
+const confirmBankTransferPayment = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+    if (order.paymentMethod !== 'bank_transfer') {
+      return res.status(400).json({ message: 'Only bank transfer payments need manual confirmation' });
+    }
+
+    order.paymentStatus = 'paid';
+    await order.save();
+
+    res.status(200).json(order);
+  } catch (err) {
+    res.status(500).json({ message: 'Server error confirming payment', error: err.message });
+  }
+};
+
 // @route  GET /api/orders
 // Staff/admin — all orders. Customers — only their own.
 const getOrders = async (req, res) => {
@@ -271,4 +287,11 @@ const updateOrderStatus = async (req, res) => {
   }
 };
 
-module.exports = { createOrder, verifyOrderPayment, getOrders, getOrderById, updateOrderStatus };
+module.exports = {
+  createOrder,
+  verifyOrderPayment,
+  confirmBankTransferPayment,
+  getOrders,
+  getOrderById,
+  updateOrderStatus,
+};
