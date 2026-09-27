@@ -9,6 +9,8 @@ router.get('/availability', reservationController.getTableAvailability);
 router.get('/mine', protect, reservationController.getMyReservations);
 router.get('/', protect, restrictTo('admin', 'waiter', 'kitchen'), reservationController.getAllReservations);
 router.post('/', protect, reservationController.createReservation);
+router.post('/:id/verify-payment', protect, reservationController.verifyReservationPayment);
+router.patch('/:id/confirm-payment', protect, restrictTo('admin', 'waiter'), reservationController.confirmReservationPayment);
 router.delete('/:id', protect, reservationController.cancelReservation);
 
 module.exports = router;
