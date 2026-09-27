@@ -10,5 +10,6 @@ router.use(restrictTo('admin', 'kitchen'));
 router.get('/', inventoryController.getAllInventory);
 router.post('/', inventoryController.addInventoryItem);
 router.put('/:id/stock', inventoryController.updateStock);
+router.patch('/:id/cost', inventoryController.updateCost);
 
 module.exports = router;
