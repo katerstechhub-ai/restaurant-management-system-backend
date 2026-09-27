@@ -11,8 +11,11 @@ exports.getAllInventory = async (req, res) => {
 
 exports.addInventoryItem = async (req, res) => {
   try {
-    const { itemName, quantity, reorderPoint, supplierInfo } = req.body;
-    const newItem = new Inventory({ itemName, quantity, reorderPoint, supplierInfo });
+    // `unit` and `costPerUnit` were previously dropped here even though the
+    // model defines both — every new item silently defaulted to 'kg' and
+    // costPerUnit 0 no matter what was submitted. Fixed.
+    const { itemName, quantity, unit, reorderPoint, supplierInfo, costPerUnit } = req.body;
+    const newItem = new Inventory({ itemName, quantity, unit, reorderPoint, supplierInfo, costPerUnit });
     await newItem.save();
     res.status(201).json(newItem);
   } catch (error) {
@@ -47,6 +50,31 @@ exports.updateStock = async (req, res) => {
     }
 
     res.json({ message: 'Stock updated', item });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// @route  PATCH /api/inventory/:id/cost
+// Updates just the market cost-per-unit for an ingredient — separate from
+// stock quantity movements (updateStock above). This is the number that
+// moves with market prices; it never touches Menu.price.
+exports.updateCost = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { costPerUnit } = req.body;
+
+    if (costPerUnit === undefined || Number(costPerUnit) < 0) {
+      return res.status(400).json({ message: 'costPerUnit must be a non-negative number' });
+    }
+
+    const item = await Inventory.findById(id);
+    if (!item) return res.status(404).json({ message: 'Item not found' });
+
+    item.costPerUnit = Number(costPerUnit);
+    await item.save();
+
+    res.json({ message: 'Cost updated', item });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
